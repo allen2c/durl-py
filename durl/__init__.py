@@ -238,9 +238,9 @@ IMAGE_MIME_TYPES: typing.TypeAlias = typing.Literal[
 DATA_URL_PATTERN = re.compile(
     r"""
     ^data:
-    (?P<media_type>[^;,]*)  # optional MIME type
+    (?P<media_type>[^;,]*)
     (?:  # whole parameter section
-        ;  # ← semicolon stays here
+        ;
         (?P<params>
             [^;,=]+=[^;,]*  # first attr=value
             (?:;[^;,=]+=[^;,]*)*  # 0-n more ;attr=value
@@ -256,7 +256,11 @@ DATA_URL_PATTERN = re.compile(
 
 
 class DataURL(pydantic.BaseModel):
-    """Represents a Data URL (RFC 2397)."""
+    """Represents a Data URL (RFC 2397).
+
+    A Data URL is a URI scheme that provides a way to include data in-line in
+    web pages as if they were external resources.
+    """
 
     mime_type: MIME_TYPES
     parameters: str | None = pydantic.Field(
@@ -298,12 +302,12 @@ class DataURL(pydantic.BaseModel):
 
     @classmethod
     def is_data_url(cls, url: str) -> bool:
-        """Check if URL is a valid data URL."""
+        """Checks if the given string is a valid data URL."""
         return bool(DATA_URL_PATTERN.match(url))
 
     @classmethod
     def from_url(cls, url: str) -> "DataURL":
-        """Create DataURL from URL string."""
+        """Creates a DataURL object from a data URL string."""
         mime_type, parameters, encoded, data = cls.__parse_url(url)
         return cls(
             mime_type=mime_type, parameters=parameters, encoded=encoded, data=data
@@ -317,7 +321,7 @@ class DataURL(pydantic.BaseModel):
         *,
         parameters: str | None = None,
     ) -> "DataURL":
-        """Create DataURL from raw data and MIME type."""
+        """Creates a DataURL object from raw data and a MIME type."""
         if isinstance(raw_data, str):
             data = base64.b64encode(raw_data.encode("utf-8")).decode("utf-8")
         else:
@@ -327,7 +331,7 @@ class DataURL(pydantic.BaseModel):
 
     @property
     def url(self) -> str:
-        """Get the complete data URL string."""
+        """Returns the full data URL string representation."""
         STRING_PATTERN = (
             "data:{media_type}{might_semicolon_parameters}{semicolon_encoded},{data}"
         )
@@ -341,24 +345,27 @@ class DataURL(pydantic.BaseModel):
 
     @property
     def url_truncated(self) -> str:
-        """Get the truncated data URL string."""
+        """Returns a truncated version of the data URL string."""
         return pretty_repr(self.url, max_string=127).strip("'\"")
 
     @property
     def data_decoded(self) -> str:
-        """Get decoded data payload."""
+        """Decodes and returns the base64-encoded data payload as a string."""
         if self.encoded == "base64":
             return base64.b64decode(self.data).decode("utf-8")
         return self.data
 
     @classmethod
-    def __parse_url(cls, url: str) -> typing.Tuple[
+    def __parse_url(
+        cls,
+        url: str,
+    ) -> typing.Tuple[
         MIME_TYPES,
         str | None,
         typing.Literal["base64"],
         str,
     ]:
-        """Parses a Data URL string into its components."""
+        """Parses a data URL string into its constituent parts."""
         m = DATA_URL_PATTERN.match(url)
         if not m:
             raise ValueError("Not a valid data URL")
@@ -376,12 +383,52 @@ class DataURL(pydantic.BaseModel):
             params = None
 
         encoded = m.group("base64")
-        if encoded is None or encoded != "base64":
+        if encoded is None or encoded.lower() != ";base64":
             raise ValueError("Data URL must be base64 encoded")
 
         encoded_data: str = m.group("payload")
 
-        return (mime_type, params, encoded, encoded_data)
+        return (mime_type, params, "base64", encoded_data)
 
     def __str__(self) -> str:
         return self.url
+
+
+def message_contents_from_text(text: str) -> typing.List[typing.Union[str, DataURL]]:
+    """Find and parse all data URLs in a string.
+
+    This function splits the input text into a sequence of strings and
+    DataURL objects. It will raise a ValueError for data URLs that are
+    not base64 encoded.
+    """
+    pattern = re.compile(
+        r"""
+        (data:
+        (?P<media_type>[^;,]*)
+        (?:
+            ;
+            (?P<params>
+                [^;,=]+=[^;,]*
+                (?:;[^;,=]+=[^;,]*)*
+            )
+        )?
+        ;base64,
+        (?P<payload>(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?)
+        )
+        """,
+        re.I | re.VERBOSE | re.S,
+    )
+
+    contents = []
+    last_end = 0
+    for match in pattern.finditer(text):
+        if match.start() > last_end:
+            contents.append(text[last_end : match.start()])
+
+        contents.append(DataURL.from_url(match.group(0)))
+        last_end = match.end()
+
+    if last_end < len(text):
+        contents.append(text[last_end:])
+
+    return [c for c in contents if c]
