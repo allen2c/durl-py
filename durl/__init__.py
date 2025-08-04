@@ -1,11 +1,21 @@
+import base64
 import enum
+import logging
 import pathlib
+import re
 import types
+import typing
+import urllib.parse
+
+import pydantic
+from rich.pretty import pretty_repr
 
 __version__ = pathlib.Path(__file__).parent.joinpath("VERSION").read_text().strip()
 
+logger = logging.getLogger(__name__)
 
-class MIMEType(enum.Enum):
+
+class MIMEType(enum.StrEnum):
     AAC_AUDIO = "audio/aac"  # AAC audio
     ABIWORD_DOCUMENT = "application/x-abiword"  # AbiWord document
     ANIMATED_PORTABLE_NETWORK_GRAPHICS_APNG_IMAGE = (
@@ -188,3 +198,190 @@ ExtensionMIMEType = types.MappingProxyType(
         "zip": MIMEType.ZIP_ARCHIVE,
     }
 )
+
+MIME_TYPES: typing.TypeAlias = MIMEType
+TEXT_MIME_TYPES: typing.TypeAlias = typing.Literal[
+    MIMEType.CASCADING_STYLE_SHEETS_CSS,
+    MIMEType.COMMA_SEPARATED_VALUES_CSV,
+    MIMEType.HYPERTEXT_MARKUP_LANGUAGE_HTML,
+    MIMEType.ICALENDAR_FORMAT,
+    MIMEType.JAVASCRIPT,
+    MIMEType.JSON_FORMAT,
+    MIMEType.JSON_LD_FORMAT,
+    MIMEType.MARKDOWN,
+    MIMEType.JAVASCRIPT_MODULE,
+    MIMEType.TEXT_GENERALLY_ASCII_OR_ISO_8859_N,
+]
+AUDIO_MIME_TYPES: typing.TypeAlias = typing.Literal[
+    MIMEType.AAC_AUDIO,
+    MIMEType.MUSICAL_INSTRUMENT_DIGITAL_INTERFACE_MIDI,
+    MIMEType.MP3_AUDIO,
+    MIMEType.OGG_AUDIO,
+    MIMEType.OPUS_AUDIO_IN_OGG_CONTAINER,
+    MIMEType.WAVEFORM_AUDIO_FORMAT,
+    MIMEType.WEBM_AUDIO,
+]
+IMAGE_MIME_TYPES: typing.TypeAlias = typing.Literal[
+    MIMEType.ANIMATED_PORTABLE_NETWORK_GRAPHICS_APNG_IMAGE,
+    MIMEType.AVIF_IMAGE,
+    MIMEType.WINDOWS_OS_2_BITMAP_GRAPHICS,
+    MIMEType.GRAPHICS_INTERCHANGE_FORMAT_GIF,
+    MIMEType.ICON_FORMAT,
+    MIMEType.JPEG_IMAGES,
+    MIMEType.PORTABLE_NETWORK_GRAPHICS,
+    MIMEType.SCALABLE_VECTOR_GRAPHICS_SVG,
+    MIMEType.TAGGED_IMAGE_FILE_FORMAT_TIFF,
+    MIMEType.WEBP_IMAGE,
+]
+
+
+DATA_URL_PATTERN = re.compile(
+    r"""
+    ^data:
+    (?P<media_type>[^;,]*)  # optional MIME type
+    (?:  # whole parameter section
+        ;  # ← semicolon stays here
+        (?P<params>
+            [^;,=]+=[^;,]*  # first attr=value
+            (?:;[^;,=]+=[^;,]*)*  # 0-n more ;attr=value
+        )
+    )?  # entire param list is optional
+    (?P<base64>;base64)?  # optional ;base64 flag
+    ,
+    (?P<payload>.*)  # everything after the first comma
+    \Z
+    """,
+    re.I | re.S | re.VERBOSE,
+)
+
+
+class DataURL(pydantic.BaseModel):
+    """Represents a Data URL (RFC 2397)."""
+
+    mime_type: MIME_TYPES
+    parameters: str | None = pydantic.Field(
+        default=None,
+        description="Parameters are key-value pairs separated by semicolons",
+    )
+    encoded: typing.Literal["base64"] = pydantic.Field(
+        default="base64",
+        description="Only support base64 encoding in any instance",
+    )
+    data: str = pydantic.Field(
+        description="The data payload, which must be a base64-encoded string"
+    )
+
+    @pydantic.model_validator(mode="after")
+    def validate_parameters(self) -> typing.Self:
+        if self.parameters is None:
+            return self
+
+        if self.parameters.startswith(";"):
+            self.parameters = self.parameters.lstrip(";")
+
+        parts = self.parameters.split(";")
+        for part in parts:
+            if not part:
+                continue
+            if "=" not in part:
+                raise ValueError(f"Invalid parameter format for '{part}': missing '=' ")
+            key, value = part.split("=", 1)
+            if not key.strip() or not value.strip():
+                raise ValueError(
+                    f"Invalid parameter format for '{part}': empty key or value"
+                )
+        return self
+
+    @pydantic.model_serializer
+    def serialize_model(self) -> str:
+        return self.url
+
+    @classmethod
+    def is_data_url(cls, url: str) -> bool:
+        """Check if URL is a valid data URL."""
+        return bool(DATA_URL_PATTERN.match(url))
+
+    @classmethod
+    def from_url(cls, url: str) -> "DataURL":
+        """Create DataURL from URL string."""
+        mime_type, parameters, encoded, data = cls.__parse_url(url)
+        return cls(
+            mime_type=mime_type, parameters=parameters, encoded=encoded, data=data
+        )
+
+    @classmethod
+    def from_data(
+        cls,
+        mime_type: MIME_TYPES,
+        raw_data: str | bytes,
+        *,
+        parameters: str | None = None,
+    ) -> "DataURL":
+        """Create DataURL from raw data and MIME type."""
+        if isinstance(raw_data, str):
+            data = base64.b64encode(raw_data.encode("utf-8")).decode("utf-8")
+        else:
+            data = base64.b64encode(raw_data).decode("utf-8")
+
+        return cls(mime_type=mime_type, parameters=parameters, data=data)
+
+    @property
+    def url(self) -> str:
+        """Get the complete data URL string."""
+        STRING_PATTERN = (
+            "data:{media_type}{might_semicolon_parameters}{semicolon_encoded},{data}"
+        )
+
+        return STRING_PATTERN.format(
+            media_type=self.mime_type,
+            might_semicolon_parameters=f";{self.parameters}" if self.parameters else "",
+            semicolon_encoded=f";{self.encoded}" if self.encoded else "",
+            data=self.data,
+        )
+
+    @property
+    def url_truncated(self) -> str:
+        """Get the truncated data URL string."""
+        return pretty_repr(self.url, max_string=127).strip("'\"")
+
+    @property
+    def data_decoded(self) -> str:
+        """Get decoded data payload."""
+        if self.encoded == "base64":
+            return base64.b64decode(self.data).decode("utf-8")
+        return self.data
+
+    @classmethod
+    def __parse_url(cls, url: str) -> typing.Tuple[
+        MIME_TYPES,
+        str | None,
+        typing.Literal["base64"],
+        str,
+    ]:
+        """Parses a Data URL string into its components."""
+        m = DATA_URL_PATTERN.match(url)
+        if not m:
+            raise ValueError("Not a valid data URL")
+
+        mime_type = m.group("media_type")
+        if not mime_type:
+            raise ValueError("MIME type is required")
+        mime_type = MIMEType(mime_type)
+
+        params: str | None = m.group("params")
+        try:
+            urllib.parse.parse_qsl(params)
+        except ValueError as e:
+            logger.warning(f"Invalid parameters in data URL, ignored: {pretty_repr(e)}")
+            params = None
+
+        encoded = m.group("base64")
+        if encoded is None or encoded != "base64":
+            raise ValueError("Data URL must be base64 encoded")
+
+        encoded_data: str = m.group("payload")
+
+        return (mime_type, params, encoded, encoded_data)
+
+    def __str__(self) -> str:
+        return self.url
