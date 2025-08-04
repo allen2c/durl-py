@@ -255,6 +255,21 @@ DATA_URL_PATTERN = re.compile(
 )
 
 
+def is_text_content(mime_type: MIME_TYPES | str) -> bool:
+    mime_type = MIMEType(mime_type)
+    return mime_type in (TEXT_MIME_TYPES.__args__)
+
+
+def is_audio_content(mime_type: MIME_TYPES | str) -> bool:
+    mime_type = MIMEType(mime_type)
+    return mime_type in (AUDIO_MIME_TYPES.__args__)
+
+
+def is_image_content(mime_type: MIME_TYPES | str) -> bool:
+    mime_type = MIMEType(mime_type)
+    return mime_type in (IMAGE_MIME_TYPES.__args__)
+
+
 class DataURL(pydantic.BaseModel):
     """Represents a Data URL (RFC 2397).
 
@@ -349,11 +364,29 @@ class DataURL(pydantic.BaseModel):
         return pretty_repr(self.url, max_string=127).strip("'\"")
 
     @property
-    def data_decoded(self) -> str:
+    def data_decoded(self) -> str | bytes:
         """Decodes and returns the base64-encoded data payload as a string."""
-        if self.encoded == "base64":
-            return base64.b64decode(self.data).decode("utf-8")
-        return self.data
+        b64_decoded = base64.b64decode(self.data)
+        try:
+            return b64_decoded.decode("utf-8")
+        except UnicodeDecodeError:
+            return b64_decoded
+
+    @property
+    def is_data_decoded_str(self) -> bool:
+        return isinstance(self.data_decoded, str)
+
+    @property
+    def is_text_content(self) -> bool:
+        return is_text_content(self.mime_type)
+
+    @property
+    def is_audio_content(self) -> bool:
+        return is_audio_content(self.mime_type)
+
+    @property
+    def is_image_content(self) -> bool:
+        return is_image_content(self.mime_type)
 
     @classmethod
     def __parse_url(
