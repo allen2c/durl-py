@@ -1,5 +1,6 @@
 import base64
 import enum
+import hashlib
 import logging
 import pathlib
 import re
@@ -114,6 +115,13 @@ class MIMEType(enum.StrEnum):
     MIME_3G2_AUDIO_VIDEO_CONTAINER = "video/3gpp2"  # 3GPP2 audio/video container
     MIME_7_ZIP_ARCHIVE = "application/x-7z-compressed"  # 7-zip archive
 
+    @classmethod
+    def from_extension(cls, extension: str) -> "MIMEType":
+        return ExtensionMIMEType[extension.lower()]
+
+    def to_extension(self) -> str:
+        return MIMETypeExtension[self]
+
 
 ExtensionMIMEType = types.MappingProxyType(
     {
@@ -197,6 +205,9 @@ ExtensionMIMEType = types.MappingProxyType(
         "xul": MIMEType.XUL,
         "zip": MIMEType.ZIP_ARCHIVE,
     }
+)
+MIMETypeExtension = types.MappingProxyType(
+    {mime_type: extension for extension, mime_type in ExtensionMIMEType.items()}
 )
 
 MIME_TYPES: typing.TypeAlias = MIMEType
@@ -366,11 +377,16 @@ class DataURL(pydantic.BaseModel):
     @property
     def data_decoded(self) -> str | bytes:
         """Decodes and returns the base64-encoded data payload as a string."""
-        b64_decoded = base64.b64decode(self.data)
+        b64_decoded = self.data_decoded_bytes
         try:
             return b64_decoded.decode("utf-8")
         except UnicodeDecodeError:
             return b64_decoded
+
+    @property
+    def data_decoded_bytes(self) -> bytes:
+        """Decodes and returns the base64-encoded data payload as a bytes object."""
+        return base64.b64decode(self.data)
 
     @property
     def is_data_decoded_str(self) -> bool:
@@ -387,6 +403,13 @@ class DataURL(pydantic.BaseModel):
     @property
     def is_image_content(self) -> bool:
         return is_image_content(self.mime_type)
+
+    @property
+    def md5(self) -> str:
+        raw_data = self.data_decoded
+        if isinstance(raw_data, str):
+            raw_data = raw_data.encode("utf-8")
+        return hashlib.md5(raw_data).hexdigest()
 
     @classmethod
     def __parse_url(
@@ -425,6 +448,18 @@ class DataURL(pydantic.BaseModel):
 
     def __str__(self) -> str:
         return self.url
+
+    def save(
+        self, dirpath: pathlib.Path | str, filename: str | None = None
+    ) -> pathlib.Path:
+        dirpath = pathlib.Path(dirpath)
+        if not dirpath.exists():
+            dirpath.mkdir(parents=True, exist_ok=True)
+        if filename is None:
+            filename = f"{self.md5}.{self.mime_type.to_extension()}"
+        filepath = dirpath.joinpath(filename)
+        filepath.write_bytes(self.data_decoded_bytes)
+        return filepath
 
 
 def message_contents_from_text(text: str) -> typing.List[typing.Union[str, DataURL]]:
