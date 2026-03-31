@@ -2,8 +2,7 @@ import textwrap
 
 from durl import DataURL, message_contents_from_text
 
-RAW_CONTENT = textwrap.dedent(
-    """
+RAW_CONTENT = textwrap.dedent("""
     Can you tell me what is in the image?data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==
 
     And how is the sound like?
@@ -12,8 +11,7 @@ RAW_CONTENT = textwrap.dedent(
     And what is the text say?
     data:text/plain;base64,SGVsbG8sIHdvcmxkIQ==
 
-    """  # noqa: E501
-).strip()
+    """).strip()  # noqa: E501
 
 
 def test_message_contents_from_text():
