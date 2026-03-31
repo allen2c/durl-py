@@ -6,6 +6,7 @@ Last reviewed: 2026-03-31
 
 | ID       | Title                                   | Status | Stopped at                                                                        |
 |----------|-----------------------------------------|--------|-----------------------------------------------------------------------------------|
+| DURL-010 | Build docs site and GitHub Pages deployment | todo   | design the docs structure, add `mkdocs-material`, and wire GitHub Actions / GitHub Pages deployment |
 
 ## Recently Done
 
