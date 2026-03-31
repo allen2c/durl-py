@@ -4,14 +4,14 @@ Last reviewed: 2026-03-31
 
 ## Active
 
-| ID       | Title                                   | Status | Stopped at                                                                        |
-|----------|-----------------------------------------|--------|-----------------------------------------------------------------------------------|
-| DURL-010 | Build docs site and GitHub Pages deployment | todo   | design the docs structure, add `mkdocs-material`, and wire GitHub Actions / GitHub Pages deployment |
+| ID | Title | Status | Stopped at |
+|----|-------|--------|------------|
 
 ## Recently Done
 
 | ID       | Title                              | Completed  |
 |----------|------------------------------------|------------|
+| DURL-010 | Build docs site and GitHub Pages deployment | 2026-03-31 |
 | DURL-009 | Tighten text helper tests and optimize scanning | 2026-03-31 |
 | DURL-008 | Refine text helper naming and typing | 2026-03-31 |
 | DURL-006 | Reintroduce non-core helpers under durl.utils | 2026-03-31 |

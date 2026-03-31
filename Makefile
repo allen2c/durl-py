@@ -15,6 +15,12 @@ update:
 mkdocs:
 	mkdocs serve -a 0.0.0.0:8000
 
+docs-serve:
+	mkdocs serve -a 0.0.0.0:8000
+
+docs-build:
+	mkdocs build --strict
+
 # Tests
 pytest:
 	python -m pytest -q

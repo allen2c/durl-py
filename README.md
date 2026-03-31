@@ -142,6 +142,18 @@ Install dependencies:
 poetry install --all-extras --all-groups
 ```
 
+Run the docs site locally:
+
+```bash
+make docs-serve
+```
+
+Build the docs site:
+
+```bash
+make docs-build
+```
+
 Canonical test command:
 
 ```bash
@@ -153,6 +165,9 @@ The repository also provides:
 ```bash
 make pytest
 ```
+
+The repository documentation site is built with `mkdocs-material` and deployed
+to GitHub Pages through GitHub Actions.
 
 ## License
 
