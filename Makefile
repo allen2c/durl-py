@@ -1,23 +1,7 @@
 # Development
 format:
-	@isort . \
-		--skip setup.py \
-		--skip .venv \
-		--skip build \
-		--skip dist \
-		--skip __pycache__ \
-		--skip docs \
-		--skip static \
-		--skip .conda
-	@black . \
-		--exclude setup.py \
-		--exclude .venv \
-		--exclude build \
-		--exclude dist \
-		--exclude __pycache__ \
-		--exclude docs \
-		--exclude static \
-		--exclude .conda
+	@isort durl tests
+	@black durl tests
 
 install:
 	poetry install --all-extras --all-groups
@@ -31,6 +15,12 @@ update:
 mkdocs:
 	mkdocs serve -a 0.0.0.0:8000
 
+docs-serve:
+	mkdocs serve -a 0.0.0.0:8000
+
+docs-build:
+	mkdocs build --strict
+
 # Tests
 pytest:
-	python -m pytest
+	python -m pytest -q

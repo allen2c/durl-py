@@ -1,0 +1,29 @@
+site_name: durl-py
+site_description: Minimal, strict Data URL handling for Python
+site_url: https://allen2c.github.io/durl-py/
+repo_url: https://github.com/allen2c/durl-py
+repo_name: allen2c/durl-py
+
+theme:
+  name: material
+  language: en
+  features:
+    - navigation.sections
+    - navigation.top
+    - content.code.copy
+
+nav:
+  - Overview: index.md
+  - DURL API: durl.md
+  - Text Helpers: text-helpers.md
+  - Development: development.md
+
+markdown_extensions:
+  - admonition
+  - codehilite
+  - pymdownx.highlight
+  - pymdownx.inlinehilite
+  - pymdownx.superfences
+
+plugins:
+  - search

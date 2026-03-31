@@ -1,6 +1,10 @@
 # durl-py
 
-A lightweight Python library for working with Data URLs (RFC 2397).
+Minimal, strict Data URL handling for Python.
+
+`durl-py` is a small RFC 2397 library centered on one core type: `DURL`.
+It parses existing `data:` URLs, builds new ones, preserves round-trip
+serialization, and fails loudly on malformed input.
 
 ## Installation
 
@@ -8,79 +12,163 @@ A lightweight Python library for working with Data URLs (RFC 2397).
 pip install durl-py
 ```
 
+## API
+
+The public API is intentionally small:
+
+```python
+from durl import DURL
+```
+
+Core properties:
+
+- `mime_type: str | None`
+- `parameters: Mapping[str, str]`
+- `is_base64: bool`
+- `raw_data: str`
+- `parsed_data: str | bytes`
+
 ## Usage
 
-### DataURL Class
-
-The `durl.DataURL` class provides a convenient way to create, parse, and manipulate Data URLs.
-
-**Creating a DataURL from raw data:**
+Parse an existing Data URL:
 
 ```python
-from durl import DataURL, MIMEType
+from durl import DURL
 
-# From bytes
-data_url = DataURL.from_data(MIMEType.TEXT_PLAIN, b"Hello, World!")
-print(data_url.url)
-# data:text/plain;base64,SGVsbG8sIFdvcmxkIQ==
+durl = DURL("data:text/plain;base64,SGVsbG8sIFdvcmxkIQ==")
 
-# From string
-data_url = DataURL.from_data(MIMEType.TEXT_PLAIN, "Hello, World!")
-print(data_url.url)
-# data:text/plain;base64,SGVsbG8sIFdvcmxkIQ==
-```
-
-**Parsing a DataURL string:**
-
-```python
-from durl import DataURL
-
-data_url_string = "data:text/plain;base64,SGVsbG8sIFdvcmxkIQ=="
-data_url = DataURL.from_url(data_url_string)
-
-print(data_url.mime_type)
+print(durl.mime_type)
 # text/plain
 
-print(data_url.data_decoded)
+print(durl.is_base64)
+# True
+
+print(durl.parsed_data)
 # Hello, World!
+
+print(str(durl))
+# data:text/plain;base64,SGVsbG8sIFdvcmxkIQ==
 ```
 
-### `message_contents_from_text` function
-
-The `durl.message_contents_from_text` function allows you to extract Data URLs from a string.
+Parse a non-base64 Data URL with `charset`:
 
 ```python
-from durl import message_contents_from_text, DataURL
+from durl import DURL
 
-text = "Here is an image: data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAUAAAAFCAYAAACNbyblAAAAHElEQVQI12P4//8/w38GIAXDIBKE0DHxgljNBAAO9TXL0Y4OHwAAAABJRU5ErkJggg== and some text."
+durl = DURL("data:text/plain;charset=UTF-8,%E4%BD%A0%E5%A5%BD")
 
-contents = message_contents_from_text(text)
+print(durl.parameters["charset"])
+# UTF-8
 
-print(contents[0])
-# Here is an image:
-
-assert isinstance(contents[1], DataURL)
-print(contents[1].mime_type)
-# image/png
-
-print(contents[2])
-# and some text.
+print(durl.parsed_data)
+# 你好
 ```
+
+Build a new Data URL from bytes:
+
+```python
+from durl import DURL
+
+durl = DURL.build(mime_type="text/plain", data=b"Hello, World!")
+
+print(durl.raw_data)
+# SGVsbG8sIFdvcmxkIQ==
+
+print(str(durl))
+# data:text/plain;base64,SGVsbG8sIFdvcmxkIQ==
+```
+
+Build a non-base64 URL explicitly:
+
+```python
+from durl import DURL
+
+durl = DURL.build(
+    mime_type="text/plain",
+    data="你好".encode("utf-8"),
+    parameters={"charset": "UTF-8"},
+    is_base64=False,
+)
+
+print(str(durl))
+# data:text/plain;charset=UTF-8,%E4%BD%A0%E5%A5%BD
+```
+
+Use immutable `with_*()` updates:
+
+```python
+from durl import DURL
+
+original = DURL("data:text/plain;base64,SGVsbG8=")
+updated = original.with_mime_type("text/markdown").with_parameters(
+    {"charset": "UTF-8"}
+)
+
+print(str(original))
+# data:text/plain;base64,SGVsbG8=
+
+print(str(updated))
+# data:text/markdown;charset=UTF-8;base64,SGVsbG8=
+```
+
+## Behavior
+
+- Parsing is strict and RFC 2397-oriented.
+- Both base64 and non-base64 forms are supported.
+- Non-base64 payloads are percent-decoded.
+- `charset` is respected when present.
+- Text payloads without `charset` must be ASCII, or decoding raises `ValueError`.
+- Invalid media types, duplicate parameters, malformed percent-encoding, and invalid base64 all raise `ValueError`.
+
+## Non-core Helpers
+
+Text scanning helpers live outside the `DURL` core API:
+
+```python
+from durl.utils.text import contents_from_text
+```
+
+`contents_from_text()` scans a larger string and returns a mixed list of
+plain text segments and parsed `DURL` objects.
+
+Filesystem helpers are still kept out of the core object and can be added under
+`durl.utils.*` later if needed.
 
 ## Development
 
-To install the development dependencies, run:
+Install dependencies:
 
 ```bash
-pip install -r requirements-all.txt
+poetry install --all-extras --all-groups
 ```
 
-To run the tests, run:
+Run the docs site locally:
 
 ```bash
-pytest
+make docs-serve
 ```
+
+Build the docs site:
+
+```bash
+make docs-build
+```
+
+Canonical test command:
+
+```bash
+python -m pytest -q
+```
+
+The repository also provides:
+
+```bash
+make pytest
+```
+
+The repository documentation site is built with `mkdocs-material` and deployed
+to GitHub Pages through GitHub Actions.
 
 ## License
 
-This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
+MIT. See [LICENSE](LICENSE).
