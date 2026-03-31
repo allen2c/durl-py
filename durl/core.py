@@ -8,6 +8,7 @@ from .parser import (
     DURLComponents,
     build_durl,
     decode_durl_data,
+    normalize_durl_metadata,
     parse_durl,
     serialize_durl,
 )
@@ -108,13 +109,17 @@ class DURL:
         is_base64: bool | object = _MISSING,
         raw_data: str | object = _MISSING,
     ) -> DURL:
+        next_mime_type = self.mime_type if mime_type is _MISSING else mime_type
+        next_parameters = (
+            self.parameters if parameters is _MISSING else parameters or {}
+        )
+        normalized_mime_type, normalized_parameters = normalize_durl_metadata(
+            mime_type=next_mime_type,
+            parameters=next_parameters,
+        )
         components = DURLComponents(
-            mime_type=self.mime_type if mime_type is _MISSING else mime_type,
-            parameters=tuple(
-                (
-                    self.parameters if parameters is _MISSING else parameters or {}
-                ).items()
-            ),
+            mime_type=normalized_mime_type,
+            parameters=normalized_parameters,
             is_base64=self.is_base64 if is_base64 is _MISSING else is_base64,
             raw_data=self.raw_data if raw_data is _MISSING else raw_data,
         )

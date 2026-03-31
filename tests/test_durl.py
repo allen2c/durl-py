@@ -1,179 +1,159 @@
-import base64
-import tempfile
+"""v0.3.0 contract tests. Canonical command: `python -m pytest -q`."""
 
 import pytest
 
-from durl import DataURL, MIMEType
+from durl import DURL
 
 
-class TestDataURL:
-    """Test suite for DataURL class."""
+def test_constructs_from_base64_data_url() -> None:
+    durl = DURL("data:text/plain;base64,SGVsbG8gV29ybGQ=")
 
-    def test_constructor_with_valid_data(self) -> None:
-        """Test DataURL constructor with valid parameters."""
-        data_url = DataURL(
-            mime_type=MIMEType.TEXT_GENERALLY_ASCII_OR_ISO_8859_N,
-            data=base64.b64encode(b"Hello World").decode("utf-8"),
+    assert durl.mime_type == "text/plain"
+    assert dict(durl.parameters) == {}
+    assert durl.is_base64 is True
+    assert durl.raw_data == "SGVsbG8gV29ybGQ="
+    assert durl.parsed_data == "Hello World"
+    assert durl.value == "data:text/plain;base64,SGVsbG8gV29ybGQ="
+
+
+def test_constructs_from_non_base64_binary_data_url() -> None:
+    durl = DURL("data:application/octet-stream,%00%FF%10")
+
+    assert durl.mime_type == "application/octet-stream"
+    assert durl.is_base64 is False
+    assert durl.parsed_data == b"\x00\xff\x10"
+    assert str(durl) == "data:application/octet-stream,%00%FF%10"
+
+
+def test_constructs_from_non_base64_data_url_without_mime_type() -> None:
+    durl = DURL("data:;charset=UTF-8,%E4%BD%A0%E5%A5%BD")
+
+    assert durl.mime_type is None
+    assert dict(durl.parameters) == {"charset": "UTF-8"}
+    assert durl.is_base64 is False
+    assert durl.parsed_data == "你好"
+    assert str(durl) == "data:;charset=UTF-8,%E4%BD%A0%E5%A5%BD"
+
+
+def test_build_defaults_to_base64_and_round_trips() -> None:
+    durl = DURL.build(mime_type="text/plain", data=b"Hello World")
+
+    assert durl.is_base64 is True
+    assert durl.parsed_data == "Hello World"
+    assert DURL(str(durl)).parsed_data == "Hello World"
+
+
+def test_build_supports_non_base64_with_parameters() -> None:
+    durl = DURL.build(
+        mime_type="text/plain",
+        data="你好".encode("utf-8"),
+        parameters={"charset": "UTF-8", "format": "plain"},
+        is_base64=False,
+    )
+
+    assert durl.is_base64 is False
+    assert dict(durl.parameters) == {"charset": "UTF-8", "format": "plain"}
+    assert durl.raw_data == "%E4%BD%A0%E5%A5%BD"
+    assert durl.parsed_data == "你好"
+    assert str(durl) == "data:text/plain;charset=UTF-8;format=plain,%E4%BD%A0%E5%A5%BD"
+
+
+def test_build_without_mime_type_keeps_leading_semicolon() -> None:
+    durl = DURL.build(mime_type=None, data=b"Hello")
+
+    assert str(durl) == "data:;base64,SGVsbG8="
+
+
+def test_with_methods_return_new_instances_and_preserve_original() -> None:
+    original = DURL("data:text/plain;base64,SGVsbG8=")
+    updated = (
+        original.with_mime_type("text/markdown")
+        .with_parameters({"charset": "UTF-8"})
+        .with_raw_data("SGk=")
+    )
+
+    assert original.mime_type == "text/plain"
+    assert dict(original.parameters) == {}
+    assert original.raw_data == "SGVsbG8="
+    assert updated.mime_type == "text/markdown"
+    assert dict(updated.parameters) == {"charset": "UTF-8"}
+    assert updated.raw_data == "SGk="
+    assert updated.parsed_data == "Hi"
+
+
+def test_with_data_preserves_encoding_mode() -> None:
+    original = DURL("data:text/plain;charset=UTF-8,%E4%BD%A0%E5%A5%BD")
+    updated = original.with_data("再見".encode("utf-8"))
+
+    assert updated.is_base64 is False
+    assert updated.raw_data == "%E5%86%8D%E8%A6%8B"
+    assert updated.parsed_data == "再見"
+    assert str(updated) == "data:text/plain;charset=UTF-8,%E5%86%8D%E8%A6%8B"
+
+
+def test_parameters_mapping_is_read_only() -> None:
+    durl = DURL("data:text/plain;charset=UTF-8,Hello")
+
+    with pytest.raises(TypeError):
+        durl.parameters["charset"] = "US-ASCII"  # type: ignore[index]
+
+
+@pytest.mark.parametrize(
+    ("value", "message"),
+    [
+        ("https://example.com", "Not a valid data URL"),
+        ("data:text/plain;base64", "Not a valid data URL"),
+        ("data:text/plain;base64,***", "Invalid base64 payload"),
+        ("data:text/plain,%E4%BD%A0%ZZ", "Invalid percent-encoding in payload"),
+        (
+            "data:text/plain;charset=NO_SUCH_CHARSET,Hello",
+            "Unknown charset: NO_SUCH_CHARSET",
+        ),
+        (
+            "data:text/plain,%E4%BD%A0%E5%A5%BD",
+            "Text payload is not valid ASCII; specify a charset",
+        ),
+        (
+            "data:text/plain;base64;charset=UTF-8,SGVsbG8=",
+            "Parameters must appear before the base64 flag",
+        ),
+        (
+            "data:text/plain;charset=UTF-8;charset=US-ASCII,Hello",
+            "Duplicate parameter: charset",
+        ),
+        ("data:text plain;base64,SGVsbG8=", "Invalid media type"),
+    ],
+)
+def test_invalid_inputs_raise_clear_errors(value: str, message: str) -> None:
+    with pytest.raises(ValueError, match=message):
+        if not value.startswith("data:"):
+            DURL(value)
+        elif "payload" in message or "charset" in message:
+            _ = DURL(value).parsed_data
+        else:
+            DURL(value)
+
+
+def test_build_rejects_duplicate_parameter_names_case_insensitively() -> None:
+    with pytest.raises(ValueError, match="Duplicate parameter: CHARSET"):
+        DURL.build(
+            mime_type="text/plain",
+            data=b"Hello",
+            parameters=[("charset", "UTF-8"), ("CHARSET", "US-ASCII")],
         )
-        assert data_url.mime_type == MIMEType.TEXT_GENERALLY_ASCII_OR_ISO_8859_N
-        assert data_url.data == base64.b64encode(b"Hello World").decode("utf-8")
-        assert data_url.encoded == "base64"
 
-    def test_from_url_class_method(self) -> None:
-        """Test DataURL.from_url class method with valid data URL."""
-        url = "data:text/plain;base64,SGVsbG8gV29ybGQ="
-        data_url = DataURL.from_url(url)
-        assert data_url.mime_type == MIMEType.TEXT_GENERALLY_ASCII_OR_ISO_8859_N
-        assert data_url.data == "SGVsbG8gV29ybGQ="
-        assert data_url.encoded == "base64"
 
-    def test_from_data_class_method(self) -> None:
-        """Test DataURL.from_data class method with raw data."""
-        raw_data = "Hello World"
-        data_url = DataURL.from_data(
-            MIMEType.TEXT_GENERALLY_ASCII_OR_ISO_8859_N, raw_data
-        )
-        assert data_url.mime_type == MIMEType.TEXT_GENERALLY_ASCII_OR_ISO_8859_N
-        assert data_url.data == base64.b64encode(b"Hello World").decode("utf-8")
-        assert data_url.encoded == "base64"
+def test_with_parameters_reuses_same_validation_as_parser() -> None:
+    durl = DURL("data:text/plain;base64,SGVsbG8=")
 
-    def test_is_data_url_class_method(self) -> None:
-        """Test DataURL.is_data_url class method."""
-        valid_url = "data:text/plain;base64,SGVsbG8gV29ybGQ="
-        invalid_url = "https://example.com"
-        assert DataURL.is_data_url(valid_url) is True
-        assert DataURL.is_data_url(invalid_url) is False
+    with pytest.raises(ValueError, match="Invalid media type"):
+        durl.with_mime_type("text plain")
 
-    def test_url_property(self) -> None:
-        """Test DataURL.url property returns correct URL string."""
-        data_url = DataURL(
-            mime_type=MIMEType.TEXT_GENERALLY_ASCII_OR_ISO_8859_N,
-            data=base64.b64encode(b"Hello World").decode("utf-8"),
-        )
-        expected_url = (
-            f"data:text/plain;base64,{base64.b64encode(b'Hello World').decode('utf-8')}"
-        )
-        assert data_url.url == expected_url
+    with pytest.raises(ValueError, match="Duplicate parameter: CHARSET"):
+        durl.with_parameters([("charset", "UTF-8"), ("CHARSET", "US-ASCII")])  # type: ignore[arg-type]
 
-    def test_data_decoded_property(self) -> None:
-        """Test DataURL.data_decoded property returns decoded data."""
-        raw_data = "Hello World"
-        data_url = DataURL.from_data(
-            MIMEType.TEXT_GENERALLY_ASCII_OR_ISO_8859_N, raw_data
-        )
-        assert data_url.data_decoded == raw_data
 
-    def test_data_decoded_bytes_property(self) -> None:
-        """Test DataURL.data_decoded_bytes property returns decoded bytes."""
-        raw_data = "Hello World"
-        data_url = DataURL.from_data(
-            MIMEType.TEXT_GENERALLY_ASCII_OR_ISO_8859_N, raw_data
-        )
-        assert data_url.data_decoded_bytes == b"Hello World"
+def test_repr_wraps_serialized_value() -> None:
+    durl = DURL("data:text/plain;base64,SGVsbG8=")
 
-    def test_is_text_content_property(self) -> None:
-        """Test DataURL.is_text_content property for text MIME type."""
-        data_url = DataURL.from_data(
-            MIMEType.TEXT_GENERALLY_ASCII_OR_ISO_8859_N, "Hello"
-        )
-        assert data_url.is_text_content is True
-
-    def test_is_image_content_property(self) -> None:
-        """Test DataURL.is_image_content property for image MIME type."""
-        data_url = DataURL.from_data(
-            MIMEType.PORTABLE_NETWORK_GRAPHICS, b"fake_png_data"
-        )
-        assert data_url.is_image_content is True
-
-    def test_is_audio_content_property(self) -> None:
-        """Test DataURL.is_audio_content property for audio MIME type."""
-        data_url = DataURL.from_data(MIMEType.MP3_AUDIO, b"fake_audio_data")
-        assert data_url.is_audio_content is True
-
-    def test_md5_property(self) -> None:
-        """Test DataURL.md5 property returns MD5 hash of data."""
-        raw_data = "Hello World"
-        data_url = DataURL.from_data(
-            MIMEType.TEXT_GENERALLY_ASCII_OR_ISO_8859_N, raw_data
-        )
-        import hashlib
-
-        expected_md5 = hashlib.md5(b"Hello World").hexdigest()
-        assert data_url.md5 == expected_md5
-
-    def test_str_method(self) -> None:
-        """Test DataURL.__str__ method returns URL string."""
-        data_url = DataURL.from_data(
-            MIMEType.TEXT_GENERALLY_ASCII_OR_ISO_8859_N, "Hello"
-        )
-        assert str(data_url) == data_url.url
-
-    def test_save_method(self) -> None:
-        """Test DataURL.save method saves data to file."""
-        data_url = DataURL.from_data(
-            MIMEType.TEXT_GENERALLY_ASCII_OR_ISO_8859_N, "Hello World"
-        )
-        with tempfile.TemporaryDirectory() as tmpdir:
-            filepath = data_url.save(tmpdir)
-            assert filepath.exists()
-            assert filepath.read_bytes() == b"Hello World"
-
-    def test_url_truncated_property(self) -> None:
-        """Test DataURL.url_truncated property returns truncated URL."""
-        long_data = "x" * 200
-        data_url = DataURL.from_data(
-            MIMEType.TEXT_GENERALLY_ASCII_OR_ISO_8859_N, long_data
-        )
-        truncated = data_url.url_truncated
-        full_url = data_url.url
-        # Test that truncation actually occurs for long URLs
-        assert len(truncated) < len(full_url)
-        # Test that the truncated version starts with the data URL prefix
-        assert truncated.startswith("data:text/plain;base64,")
-
-    def test_is_data_decoded_str_property(self) -> None:
-        """Test DataURL.is_data_decoded_str property returns correct boolean."""
-        text_data_url = DataURL.from_data(
-            MIMEType.TEXT_GENERALLY_ASCII_OR_ISO_8859_N, "Hello"
-        )
-        binary_data_url = DataURL.from_data(
-            MIMEType.PORTABLE_NETWORK_GRAPHICS, b"\x89PNG"
-        )
-        assert text_data_url.is_data_decoded_str is True
-        assert binary_data_url.is_data_decoded_str is False
-
-    def test_from_url_with_invalid_url(self) -> None:
-        """Test DataURL.from_url raises ValueError for invalid URL."""
-        invalid_url = "https://example.com"
-        with pytest.raises(ValueError, match="Not a valid data URL"):
-            DataURL.from_url(invalid_url)
-
-    def test_from_url_with_non_base64_encoding(self) -> None:
-        """Test DataURL.from_url raises ValueError for non-base64 encoding."""
-        invalid_url = "data:text/plain,Hello%20World"  # URL encoding instead of base64
-        with pytest.raises(ValueError, match="Data URL must be base64 encoded"):
-            DataURL.from_url(invalid_url)
-
-    def test_validate_parameters_with_invalid_format(self) -> None:
-        """Test parameter validation with invalid format."""
-        with pytest.raises(ValueError, match="Invalid parameter format"):
-            DataURL(
-                mime_type=MIMEType.TEXT_GENERALLY_ASCII_OR_ISO_8859_N,
-                data="SGVsbG8=",
-                parameters="invalid_param_without_equals",
-            )
-
-    def test_from_url_with_missing_mime_type(self) -> None:
-        """Test DataURL.from_url raises ValueError for missing MIME type."""
-        invalid_url = "data:;base64,SGVsbG8="
-        with pytest.raises(ValueError, match="MIME type is required"):
-            DataURL.from_url(invalid_url)
-
-    def test_serialize_model_method(self) -> None:
-        """Test DataURL model serialization returns URL string."""
-        data_url = DataURL.from_data(
-            MIMEType.TEXT_GENERALLY_ASCII_OR_ISO_8859_N, "Hello"
-        )
-        # Test that the Pydantic serialization returns the URL
-        serialized = data_url.model_dump()
-        assert serialized == data_url.url
+    assert repr(durl) == "DURL('data:text/plain;base64,SGVsbG8=')"
