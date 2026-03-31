@@ -17,4 +17,4 @@ mkdocs:
 
 # Tests
 pytest:
-	python -m pytest
+	python -m pytest -q
